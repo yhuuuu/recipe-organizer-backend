@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const Recipe = require('../models/recipe');
 
@@ -16,6 +17,10 @@ router.get('/', async (req, res, next) => {
     }
 
     const recipes = await Recipe.find(filter).sort({ createdAt: -1 }).lean().exec();
+    console.log(`Found ${recipes.length} recipes for query:`, { q, cuisine });
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
     res.json(recipes);
   } catch (err) {
     next(err);
@@ -25,6 +30,9 @@ router.get('/', async (req, res, next) => {
 // GET /api/recipes/:id
 router.get('/:id', async (req, res, next) => {
   try {
+    if (!req.params.id || !mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ error: 'Recipe not found' });
+    }
     const recipe = await Recipe.findById(req.params.id).lean().exec();
     if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
     res.json(recipe);
@@ -54,22 +62,38 @@ router.post(
 );
 
 // PUT /api/recipes/:id - replace/update
-router.put('/:id', async (req, res, next) => {
-  try {
-    const updates = req.body;
-    const updated = await Recipe.findByIdAndUpdate(req.params.id, updates, { new: true }).exec();
-    if (!updated) return res.status(404).json({ error: 'Recipe not found' });
-    res.json(updated);
-  } catch (err) {
-    next(err);
+router.put(
+  '/:id',
+  body('title').isString().notEmpty(),
+  body('ingredients').isArray({ min: 1 }),
+  body('steps').isArray({ min: 1 }),
+  async (req, res, next) => {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+        return res.status(400).json({ error: 'Invalid recipe ID' });
+      }
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+      const recipe = await Recipe.findById(req.params.id).exec();
+      if (!recipe) return res.status(404).json({ error: 'Recipe not found' });
+      Object.assign(recipe, req.body);
+      await recipe.save();
+      res.json(recipe);
+    } catch (err) {
+      next(err);
+    }
   }
-});
+);
 
 // PATCH /api/recipes/:id - partial update
 router.patch('/:id', async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid recipe ID' });
+    }
     const updates = req.body;
-    const updated = await Recipe.findByIdAndUpdate(req.params.id, updates, { new: true }).exec();
+    const updated = await Recipe.findByIdAndUpdate(req.params.id, updates, { new: true, runValidators: true }).exec();
     if (!updated) return res.status(404).json({ error: 'Recipe not found' });
     res.json(updated);
   } catch (err) {
@@ -80,6 +104,9 @@ router.patch('/:id', async (req, res, next) => {
 // DELETE /api/recipes/:id
 router.delete('/:id', async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'Invalid recipe ID' });
+    }
     const removed = await Recipe.findByIdAndDelete(req.params.id).exec();
     if (!removed) return res.status(404).json({ error: 'Recipe not found' });
     res.status(204).end();
