@@ -6,6 +6,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 
 const recipesRouter = require('./routes/recipes');
+const extractRouter = require('./routes/extract');
 
 const app = express();
 
@@ -20,6 +21,7 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/recipes', recipesRouter);
+app.use('/api/extract', extractRouter);
 
 // Health
 app.get('/api/health', (req, res) => res.json({ ok: true }));
