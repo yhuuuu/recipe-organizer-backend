@@ -1,6 +1,8 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const OpenAI = require('openai');
+const axios = require('axios');
+const cheerio = require('cheerio');
 
 const router = express.Router();
 
@@ -59,10 +61,59 @@ const recipeSchema = {
   required: ['title', 'ingredients', 'steps', 'cuisine'],
 };
 
-// POST /api/extract - Extract recipe information from raw text
+// Helper: 检测是否为有效的 URL
+function isValidUrl(string) {
+  try {
+    new URL(string);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Helper: 从网页爬取文本内容
+async function scrapeWebpage(url) {
+  try {
+    console.log(`Scraping webpage: ${url}`);
+    const response = await axios.get(url, {
+      timeout: 10000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+
+    const $ = cheerio.load(response.data);
+
+    // 移除脚本和样式
+    $('script, style').remove();
+
+    // 提取主要文本内容（优先级：main > article > body）
+    let content = $('main').text() || $('article').text() || $('body').text();
+    
+    // 清理文本：移除多余空白
+    content = content
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .join('\n');
+
+    if (!content || content.length < 50) {
+      throw new Error('Unable to extract meaningful content from webpage');
+    }
+
+    console.log(`Extracted ${content.length} characters from ${url}`);
+    return content;
+  } catch (error) {
+    console.error(`Scraping error for ${url}:`, error.message);
+    throw new Error(`Failed to scrape webpage: ${error.message}`);
+  }
+}
+
+// POST /api/extract - Extract recipe information from raw text or URL
 router.post(
   '/',
-  body('text').isString().notEmpty().withMessage('Text is required'),
+  body('text').optional().isString(),
+  body('url').optional().isString(),
   async (req, res, next) => {
     try {
       const errors = validationResult(req);
@@ -70,8 +121,22 @@ router.post(
         return res.status(400).json({ errors: errors.array() });
       }
 
-      const { text } = req.body;
-      console.log('Received text for extraction:', text.substring(0, 100) + '...');
+      let { text, url } = req.body;
+      let textToExtract = text;
+
+      // 如果提供了 URL，先爬取网页
+      if (url && isValidUrl(url)) {
+        console.log(`URL provided: ${url}`);
+        try {
+          textToExtract = await scrapeWebpage(url);
+        } catch (scrapeError) {
+          return res.status(400).json({ error: scrapeError.message });
+        }
+      } else if (!textToExtract) {
+        return res.status(400).json({ error: 'Either text or a valid URL must be provided' });
+      }
+
+      console.log('Received text for extraction:', textToExtract.substring(0, 100) + '...');
 
       const systemPrompt = `You are a recipe extraction assistant. Extract recipe data and return JSON only, matching this schema:
 ${JSON.stringify(recipeSchema)}
@@ -83,7 +148,7 @@ Rules:
 
       const messages = [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: text },
+        { role: 'user', content: textToExtract },
       ];
 
       const result = await genAI.chat.completions.create({
@@ -105,7 +170,7 @@ Rules:
         steps: extractedRecipe.steps || [],
         cuisine: extractedRecipe.cuisine || 'Western',
         image: extractedRecipe.image || '',
-        sourceUrl: extractedRecipe.sourceUrl || '',
+        sourceUrl: url || extractedRecipe.sourceUrl || '',
       };
 
       console.log('Sending response:', recipe);
