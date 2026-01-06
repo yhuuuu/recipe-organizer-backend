@@ -1,16 +1,28 @@
-# 认证与用户菜单管理 API 文档
+# Authentication & User Recipe Management API
 
-## 概述
-后端已实现用户认证系统（JWT），不同用户可以保存和管理自己的菜单。
+Complete guide for implementing user authentication and user-specific recipe management in the frontend.
 
 ---
 
-## 认证端点
+## Overview
 
-### 1. 注册新用户
-**POST** `/api/auth/register`
+This backend uses **JWT (JSON Web Tokens)** for stateless authentication. Each user can register, login, and manage their own recipes independently.
 
-**请求体:**
+**Key Features:**
+- Secure password hashing with bcryptjs
+- JWT tokens with 7-day expiration
+- User-specific recipe isolation
+- Protected routes with authentication middleware
+
+---
+
+## Authentication Endpoints
+
+### 1. Register New User
+
+**Endpoint:** `POST /api/auth/register`
+
+**Request:**
 ```json
 {
   "username": "john_doe",
@@ -19,27 +31,35 @@
 }
 ```
 
-**响应 (201):**
+**Validation Rules:**
+- `username`: 3-30 characters, lowercase, unique
+- `email`: Valid email format, unique
+- `password`: Minimum 6 characters
+
+**Success Response (201):**
 ```json
 {
-  "id": "user_id_123",
+  "id": "675a1b2c3d4e5f6789012345",
   "username": "john_doe",
   "email": "john@example.com",
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
-**验证规则:**
-- username: 3-30 字符，小写，唯一
-- email: 有效邮箱格式，唯一
-- password: 最少 6 字符
+**Error Response (409 Conflict):**
+```json
+{
+  "error": "Username or email already exists"
+}
+```
 
 ---
 
-### 2. 用户登录
-**POST** `/api/auth/login`
+### 2. Login User
 
-**请求体:**
+**Endpoint:** `POST /api/auth/login`
+
+**Request:**
 ```json
 {
   "username": "john_doe",
@@ -47,100 +67,154 @@
 }
 ```
 
-**响应 (200):**
+**Success Response (200):**
 ```json
 {
-  "id": "user_id_123",
+  "id": "675a1b2c3d4e5f6789012345",
   "username": "john_doe",
   "email": "john@example.com",
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
 ```
 
+**Error Response (401 Unauthorized):**
+```json
+{
+  "error": "Invalid username or password"
+}
+```
+
 ---
 
-## 菜单端点 (需要认证)
+## Protected Recipe Endpoints
 
-所有菜单端点都需要在请求头中包含 JWT token：
+All recipe endpoints require authentication via JWT token in the request header.
 
+### Authentication Header
+
+```http
+Authorization: Bearer <your_jwt_token>
 ```
-Authorization: Bearer <token>
+
+---
+
+### 3. Get All User Recipes
+
+**Endpoint:** `GET /api/recipes`
+
+**Query Parameters:**
+- `q` (optional): Search in title and ingredients (case-insensitive regex)
+- `cuisine` (optional): Filter by cuisine type
+
+**Example:**
+```http
+GET /api/recipes?q=chicken&cuisine=Chinese
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
-### 3. 获取当前用户的所有菜单
-**GET** `/api/recipes`
-
-**查询参数:**
-- `q` (可选): 搜索标题或食材
-- `cuisine` (可选): 按菜系过滤
-
-**响应 (200):**
+**Success Response (200):**
 ```json
 [
   {
-    "id": "recipe_id_1",
-    "userId": "user_id_123",
-    "title": "炒菜",
-    "image": "https://...",
-    "ingredients": ["油", "盐", "菜"],
-    "steps": ["切菜", "炒菜", "起锅"],
+    "id": "675a1b2c3d4e5f6789012345",
+    "userId": "675a1b2c3d4e5f6789012340",
+    "title": "Kung Pao Chicken",
+    "ingredients": ["chicken breast", "peanuts", "peppers", "soy sauce"],
+    "steps": ["Cut chicken", "Stir fry", "Add sauce"],
     "cuisine": "Chinese",
-    "sourceUrl": "https://...",
+    "image": "https://example.com/image.jpg",
+    "sourceUrl": "https://example.com/recipe",
     "rating": 4.5,
     "isWishlisted": false,
-    "createdAt": "2025-01-05T..."
+    "createdAt": "2026-01-05T10:30:00.000Z"
   }
 ]
 ```
 
----
-
-### 4. 获取单个菜单详情
-**GET** `/api/recipes/:id`
-
-**响应 (200):** 同上单个菜单对象
+**Notes:**
+- Only returns recipes belonging to the authenticated user
+- Results are sorted by `createdAt` descending (newest first)
 
 ---
 
-### 5. 创建新菜单
-**POST** `/api/recipes`
+### 4. Get Single Recipe
 
-**请求体:**
+**Endpoint:** `GET /api/recipes/:id`
+
+**Example:**
+```http
+GET /api/recipes/675a1b2c3d4e5f6789012345
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Success Response (200):** Single recipe object (same structure as above)
+
+**Error Response (404):**
 ```json
 {
-  "title": "番茄鸡蛋汤",
-  "image": "https://...",
-  "ingredients": ["番茄", "鸡蛋", "盐", "油"],
+  "error": "Recipe not found"
+}
+```
+
+**Note:** Returns 404 if recipe doesn't exist OR doesn't belong to the authenticated user.
+
+---
+
+### 5. Create Recipe
+
+**Endpoint:** `POST /api/recipes`
+
+**Required Fields:** `title`, `ingredients[]`, `steps[]`
+
+**Request:**
+```json
+{
+  "title": "Tomato Egg Soup",
+  "ingredients": ["2 tomatoes", "3 eggs", "1 tsp salt", "2 cups water"],
   "steps": [
-    "番茄切块",
-    "锅里炒番茄",
-    "加入鸡蛋",
-    "加水烧开"
+    "Cut tomatoes into wedges",
+    "Beat eggs in a bowl",
+    "Boil water and add tomatoes",
+    "Pour in beaten eggs while stirring",
+    "Season with salt"
   ],
   "cuisine": "Chinese",
-  "sourceUrl": "https://...",
+  "image": "https://example.com/tomato-soup.jpg",
+  "sourceUrl": "https://example.com/recipe",
   "rating": 4,
   "isWishlisted": false
 }
 ```
 
-**响应 (201):** 返回创建的菜单对象（含 id）
+**Success Response (201):**
+Returns the created recipe with `id` and `userId` fields.
+
+**Note:** The `userId` is automatically set from the JWT token.
 
 ---
 
-### 6. 更新菜单（完全替换）
-**PUT** `/api/recipes/:id`
+### 6. Update Recipe (Full Replace)
 
-**请求体:** 同创建菜单
+**Endpoint:** `PUT /api/recipes/:id`
 
-**响应 (200):** 返回更新后的菜单对象
+**Request:** Complete recipe object (same as create)
+
+**Success Response (200):** Returns updated recipe
+
+**Error Response (404):**
+```json
+{
+  "error": "Recipe not found"
+}
+```
 
 ---
 
-### 7. 部分更新菜单
-**PATCH** `/api/recipes/:id`
+### 7. Partial Update Recipe
 
-**请求体:**
+**Endpoint:** `PATCH /api/recipes/:id`
+
+**Request Example:**
 ```json
 {
   "rating": 5,
@@ -148,33 +222,111 @@ Authorization: Bearer <token>
 }
 ```
 
-**响应 (200):** 返回更新后的菜单对象
+**Success Response (200):** Returns updated recipe
+
+**Use Cases:**
+- Update rating after trying the recipe
+- Toggle wishlist status
+- Update individual fields without sending entire object
 
 ---
 
-### 8. 删除菜单
-**DELETE** `/api/recipes/:id`
+### 8. Delete Recipe
 
-**响应:** 204 No Content
+**Endpoint:** `DELETE /api/recipes/:id`
+
+**Example:**
+```http
+DELETE /api/recipes/675a1b2c3d4e5f6789012345
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Success Response:** `204 No Content`
+
+**Error Response (404):**
+```json
+{
+  "error": "Recipe not found"
+}
+```
 
 ---
 
-## 前端集成步骤
+## AI Recipe Extraction (Public Endpoint)
 
-### 1. 保存 Token (登录/注册后)
+This endpoint does NOT require authentication.
+
+**Endpoint:** `POST /api/extract`
+
+### Extract from Text
+
+**Request:**
+```json
+{
+  "text": "Kung Pao Chicken Recipe\n\nIngredients:\n- 500g chicken breast\n- 100g peanuts\n\nSteps:\n1. Cut chicken\n2. Stir fry..."
+}
+```
+
+### Extract from URL
+
+**Request:**
+```json
+{
+  "url": "https://www.recipetineats.com/kung-pao-chicken/"
+}
+```
+
+**How it works:**
+1. If URL is provided, scrapes webpage content using Cheerio
+2. Sends content to Azure OpenAI (gpt-5.2-chat)
+3. AI extracts structured recipe data
+4. Returns JSON ready for frontend use
+
+**Success Response (200):**
+```json
+{
+  "title": "Kung Pao Chicken",
+  "ingredients": ["500g chicken breast", "100g peanuts", "peppers"],
+  "steps": ["Cut chicken into cubes", "Stir fry with peanuts", "Add sauce"],
+  "cuisine": "Chinese",
+  "image": "",
+  "sourceUrl": "https://www.recipetineats.com/kung-pao-chicken/"
+}
+```
+
+**Workflow:**
+1. User pastes text/URL in frontend
+2. Call `/api/extract` to get structured data
+3. Auto-fill form with extracted data
+4. User can edit before saving
+5. Call `/api/recipes` (with auth token) to save to user's account
+
+---
+
+## Frontend Integration Guide
+
+### 1. Save Token After Login/Register
+
 ```javascript
 const response = await fetch('http://localhost:4000/api/auth/login', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ username: 'john_doe', password: '...' })
+  body: JSON.stringify({ username: 'john_doe', password: 'password123' })
 });
 
-const data = await response.json();
-localStorage.setItem('token', data.token);
-localStorage.setItem('username', data.username);
+if (response.ok) {
+  const data = await response.json();
+  // Save to localStorage
+  localStorage.setItem('token', data.token);
+  localStorage.setItem('userId', data.id);
+  localStorage.setItem('username', data.username);
+}
 ```
 
-### 2. 在每个请求中包含 Token
+---
+
+### 2. Include Token in Every Protected Request
+
 ```javascript
 const token = localStorage.getItem('token');
 
@@ -185,35 +337,48 @@ const response = await fetch('http://localhost:4000/api/recipes', {
     'Content-Type': 'application/json'
   }
 });
+
+const recipes = await response.json();
 ```
 
-### 3. 处理 401 错误 (Token 过期)
+---
+
+### 3. Handle 401 Errors (Token Expired)
+
 ```javascript
+const response = await fetch('http://localhost:4000/api/recipes', {
+  headers: { 'Authorization': `Bearer ${token}` }
+});
+
 if (response.status === 401) {
-  // 清除本地存储
+  // Token expired or invalid
   localStorage.removeItem('token');
+  localStorage.removeItem('userId');
   localStorage.removeItem('username');
-  // 重定向到登录页
-  window.location.href = '/login';
+  window.location.href = '/login'; // Redirect to login
 }
 ```
 
-### 4. 提取菜谱工作流
-使用现有的 `/api/extract` 端点（无需认证）提取菜谱信息，然后用 token 保存到用户账户：
+---
+
+### 4. Complete Recipe Creation Flow
 
 ```javascript
-// 1. 从文本或 URL 提取菜谱信息
+// Step 1: Extract recipe from text/URL (no auth needed)
 const extractResponse = await fetch('http://localhost:4000/api/extract', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ 
-    text: '菜谱文本' 
-    // 或 url: 'https://...' 
+    url: 'https://www.example.com/recipe' 
   })
 });
+
 const extractedRecipe = await extractResponse.json();
 
-// 2. 保存到用户账户
+// Step 2: User can edit the extracted data in the form
+// (auto-fill form fields with extractedRecipe data)
+
+// Step 3: Save to user's account (requires auth)
 const token = localStorage.getItem('token');
 const saveResponse = await fetch('http://localhost:4000/api/recipes', {
   method: 'POST',
@@ -223,83 +388,190 @@ const saveResponse = await fetch('http://localhost:4000/api/recipes', {
   },
   body: JSON.stringify(extractedRecipe)
 });
+
+const savedRecipe = await saveResponse.json();
 ```
 
 ---
 
-## 环境变量
+### 5. Logout
 
-在 `.env` 中设置以下变量（可选，有默认值）:
-
+```javascript
+function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('userId');
+  localStorage.removeItem('username');
+  window.location.href = '/login';
+}
 ```
-JWT_SECRET=your-super-secret-key-change-in-production
-MONGODB_URI=mongodb://localhost:27017/recipe_organizer
-PORT=4000
-```
-
-Token 过期时间: **7 天**
 
 ---
 
-## 错误响应示例
+## Error Handling Reference
 
-### 缺少 Token
-**401 Unauthorized**
+### 400 Bad Request
+```json
+{
+  "errors": [
+    { "msg": "Invalid email", "param": "email" },
+    { "msg": "Password must be at least 6 characters", "param": "password" }
+  ]
+}
+```
+
+### 401 Unauthorized
 ```json
 { "error": "No token provided" }
-```
-
-### 无效 Token
-**401 Unauthorized**
-```json
 { "error": "Invalid or expired token" }
+{ "error": "Invalid username or password" }
 ```
 
-### 用户已存在
-**409 Conflict**
+### 404 Not Found
+```json
+{ "error": "Recipe not found" }
+```
+
+### 409 Conflict
 ```json
 { "error": "Username or email already exists" }
 ```
 
-### 无效凭证
-**401 Unauthorized**
+### 500 Internal Server Error
 ```json
-{ "error": "Invalid username or password" }
+{ "error": "Internal Server Error" }
 ```
 
 ---
 
-## 测试 cURL 示例
+## Environment Variables
 
-### 注册
+Required variables in `.env`:
+
+```bash
+# JWT Secret (change in production!)
+JWT_SECRET=your-super-secret-key-change-in-production
+
+# MongoDB
+MONGODB_URI=mongodb+srv://...
+
+# Server
+PORT=4000
+
+# Azure OpenAI (for recipe extraction)
+AZURE_OPENAI_ENDPOINT=https://...
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_DEPLOYMENT=gpt-5.2-chat
+AZURE_OPENAI_API_VERSION=2024-04-01-preview
+```
+
+---
+
+## Testing with cURL
+
+### Register
 ```bash
 curl -X POST http://localhost:4000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"test_user","email":"test@example.com","password":"test123"}'
+  -d '{"username":"testuser","email":"test@example.com","password":"test123"}'
 ```
 
-### 登录
+### Login
 ```bash
 curl -X POST http://localhost:4000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"test_user","password":"test123"}'
+  -d '{"username":"testuser","password":"test123"}'
 ```
 
-### 获取菜谱列表
+### Get Recipes
 ```bash
 curl -X GET http://localhost:4000/api/recipes \
   -H "Authorization: Bearer YOUR_TOKEN_HERE"
 ```
 
-### 创建菜谱
+### Create Recipe
 ```bash
 curl -X POST http://localhost:4000/api/recipes \
   -H "Authorization: Bearer YOUR_TOKEN_HERE" \
   -H "Content-Type: application/json" \
   -d '{
-    "title":"番茄鸡蛋汤",
-    "ingredients":["番茄","鸡蛋"],
-    "steps":["炒番茄","加鸡蛋"],
+    "title":"Test Recipe",
+    "ingredients":["ingredient1","ingredient2"],
+    "steps":["step1","step2"],
     "cuisine":"Chinese"
   }'
 ```
+
+### Extract Recipe from URL
+```bash
+curl -X POST http://localhost:4000/api/extract \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.recipetineats.com/chicken-breast-recipe/"}'
+```
+
+---
+
+## Security Best Practices
+
+✅ **Never expose JWT_SECRET** - Keep it in `.env` and change in production  
+✅ **Use HTTPS in production** - Encrypt data in transit  
+✅ **Token expiration** - Tokens expire in 7 days, implement refresh if needed  
+✅ **Password requirements** - Enforce minimum 6 characters (consider increasing)  
+✅ **Input validation** - All inputs are validated with express-validator  
+✅ **User isolation** - Recipes are filtered by userId at database level  
+
+---
+
+## Token Structure
+
+JWT tokens contain:
+
+```json
+{
+  "userId": "675a1b2c3d4e5f6789012345",
+  "username": "john_doe",
+  "iat": 1736082000,
+  "exp": 1736686800
+}
+```
+
+- `iat`: Issued at timestamp
+- `exp`: Expiration timestamp (7 days from issue)
+
+---
+
+## Database Schema
+
+### Users Collection
+```javascript
+{
+  _id: ObjectId,
+  username: String (unique, 3-30 chars, lowercase),
+  email: String (unique, valid format),
+  password: String (bcrypt hashed, not returned by default),
+  createdAt: Date
+}
+```
+
+### Recipes Collection
+```javascript
+{
+  _id: ObjectId,
+  userId: ObjectId (ref: 'User', indexed),
+  title: String (required),
+  ingredients: [String],
+  steps: [String],
+  cuisine: String (default: 'Western'),
+  image: String,
+  sourceUrl: String,
+  rating: Number (default: 0),
+  isWishlisted: Boolean (default: false),
+  createdAt: Date
+}
+```
+
+---
+
+## Support
+
+For questions or issues, please open an issue on GitHub:
+https://github.com/yhuuuu/recipe-organizer-backend/issues
