@@ -5,6 +5,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
+const authRouter = require('./routes/auth');
 const recipesRouter = require('./routes/recipes');
 const extractRouter = require('./routes/extract');
 
@@ -20,6 +21,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 
 // Routes
+app.use('/api/auth', authRouter);
 app.use('/api/recipes', recipesRouter);
 app.use('/api/extract', extractRouter);
 
