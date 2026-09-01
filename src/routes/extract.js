@@ -26,6 +26,11 @@ const genAI = new OpenAI({
 });
 
 // Define the recipe schema for structured output
+// The frontend's Cuisine union. The model treats the schema as a suggestion and
+// has returned values outside it ("American"), which the UI cannot filter on,
+// so the response is clamped to this list rather than trusted.
+const VALID_CUISINES = ['Chinese', 'Western', 'Italian', 'Japanese', 'Korean'];
+
 const recipeSchema = {
   type: 'object',
   properties: {
@@ -49,7 +54,9 @@ const recipeSchema = {
     },
     cuisine: {
       type: 'string',
-      description: 'The cuisine type (e.g., Chinese, Western, Japanese, etc.)',
+      enum: ['Chinese', 'Western', 'Italian', 'Japanese', 'Korean'],
+      description:
+        'The cuisine type. Must be exactly one of the listed values; map anything else to the closest match (e.g. American or French -> Western).',
     },
     image: {
       type: 'string',
@@ -159,7 +166,7 @@ ${JSON.stringify(recipeSchema)}
 Rules:
 - Always return valid JSON (no extra text).
 - If a field is missing, use empty string or empty array.
-- Infer cuisine if possible; otherwise default to "Western".`;
+- cuisine must be exactly one of ${JSON.stringify(VALID_CUISINES)}; default to "Western".`;
 
       const messages = [
         { role: 'system', content: systemPrompt },
@@ -183,10 +190,30 @@ Rules:
         title: extractedRecipe.title || '',
         ingredients: extractedRecipe.ingredients || [],
         steps: extractedRecipe.steps || [],
-        cuisine: extractedRecipe.cuisine || 'Western',
+        cuisine: VALID_CUISINES.includes(extractedRecipe.cuisine)
+          ? extractedRecipe.cuisine
+          : 'Western',
         image: extractedRecipe.image || '',
         sourceUrl: url || extractedRecipe.sourceUrl || '',
       };
+
+      /*
+       * Some sites answer bots with a 200 interstitial instead of a 403. That
+       * page clears the scraper's length check, so the model is handed nav and
+       * sidebar links and invents a title from a "related recipes" list with no
+       * ingredients or steps behind it.
+       *
+       * Returning that as a success is worse than failing: the visitor gets a
+       * confident, wrong recipe. Treat an empty extraction as a failure.
+       */
+      if (recipe.ingredients.length === 0 || recipe.steps.length === 0) {
+        return res.status(422).json({
+          error: url
+            ? 'Could not read a recipe from that page — the site may be blocking automated access. Try copying the recipe text into the "Paste Content" tab.'
+            : 'Could not find a recipe in that text. Please include the ingredients and steps.',
+          code: 'NO_RECIPE_FOUND',
+        });
+      }
 
       console.log('Sending response:', recipe);
       res.json({
