@@ -1,6 +1,10 @@
-# Recipe Organizer Backend
+# Haohaochifan — Backend
 
-A RESTful API backend built with Express.js and MongoDB for managing user recipes with JWT authentication and AI-powered recipe extraction.
+A RESTful API built with Express.js and MongoDB for managing user recipes with
+JWT authentication and AI-powered recipe extraction.
+
+Serves https://haohaochifan.netlify.app · deployed at
+https://haohaochifan-api.onrender.com
 
 ## Features
 
@@ -252,6 +256,32 @@ Content-Type: application/json
 - Uses Azure OpenAI to extract structured recipe data
 - Returns JSON format ready for frontend use
 
+**Failure cases:**
+
+Some recipe sites answer scrapers with `200` and an anti-bot interstitial rather
+than a `403`. Those pages are long enough to pass a length check, so the model
+would dutifully invent a recipe out of the sidebar links and return a confident,
+entirely fictional result. Extractions that come back with no ingredients or no
+steps are therefore rejected:
+
+```json
+{
+  "error": "Could not find a recipe in that text. Please include the ingredients and steps.",
+  "code": "NO_RECIPE_FOUND"
+}
+```
+
+| Status | Meaning |
+| --- | --- |
+| 400 | The site actively blocks scrapers, or neither text nor a valid URL was sent |
+| 422 | The page was read but contains no recipe |
+| 429 | Daily quota exhausted |
+
+The model also ignores the cuisine enum in both the prompt and the JSON schema —
+it has returned values such as `American`, which is not in the frontend's union
+type. Neither the prompt nor the schema is a guarantee, so the value is clamped
+against `VALID_CUISINES` server-side before the response is sent.
+
 **Rate limiting (protects the Azure OpenAI budget):**
 
 This endpoint is intentionally public so visitors can try the AI extraction
@@ -279,8 +309,15 @@ Successful responses include the caller's remaining quota:
 { "quota": { "isGuest": true, "limit": 5, "remaining": 4 } }
 ```
 
+Quota tracks Azure OpenAI spend, not HTTP status. A `422` still cost a model
+call, so it is billed against the quota; a `400` (blocked site, bad input) never
+reached the model and is refunded. Without this, a single blocked URL could be
+replayed indefinitely at our expense, because `skipFailedRequests` refunds
+everything `>= 400`. See `requestWasSuccessful` in `src/middleware/rateLimit.js`.
+
 > Limits are stored in memory, so they reset on restart and are per-instance.
 > Move to a shared store (e.g. Redis) if you ever run more than one instance.
+> The free Render instance sleeps when idle, which resets counters in practice.
 
 ---
 
@@ -329,22 +366,32 @@ GET /api/health
 ```
 Recipe-organizer-backend/
 ├── src/
-│   ├── index.js              # Express app setup
+│   ├── index.js              # Express app setup, trust proxy for Render
 │   ├── models/
 │   │   ├── user.js           # User model with password hashing
 │   │   └── recipe.js         # Recipe model with userId reference
 │   ├── routes/
 │   │   ├── auth.js           # Registration & login endpoints
 │   │   ├── recipes.js        # CRUD recipe endpoints (protected)
-│   │   └── extract.js        # AI extraction & web scraping
+│   │   └── extract.js        # AI extraction, scraping, cuisine clamping
 │   └── middleware/
-│       └── auth.js           # JWT verification middleware
+│       ├── auth.js           # JWT verification (rejects on failure)
+│       ├── optionalAuth.js   # Identifies the caller but allows guests
+│       └── rateLimit.js      # Per-day extraction quotas
 ├── .env                      # Environment variables
 ├── .gitignore
 ├── package.json
 ├── AUTH_API.md               # Detailed authentication guide
 └── README.md
 ```
+
+`optionalAuth.js` is what makes the public demo possible: it attaches
+`req.userId` when a valid token is present and sets `req.isGuest` otherwise,
+without rejecting the request. An invalid or forged token falls through to guest,
+so the stricter quota cannot be bypassed by sending garbage.
+
+`trust proxy` is set in `index.js` because Render terminates TLS upstream —
+without it every guest would share the proxy's IP and therefore a single quota.
 
 ## Security Features
 
