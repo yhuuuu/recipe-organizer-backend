@@ -3,6 +3,8 @@ const { body, validationResult } = require('express-validator');
 const OpenAI = require('openai');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const { optionalAuthMiddleware } = require('../middleware/optionalAuth');
+const { extractRateLimiter } = require('../middleware/rateLimit');
 
 const router = express.Router();
 
@@ -105,13 +107,26 @@ async function scrapeWebpage(url) {
     return content;
   } catch (error) {
     console.error(`Scraping error for ${url}:`, error.message);
+
+    // Many recipe sites (Serious Eats, NYT Cooking, ...) block server-side
+    // fetches. Tell the visitor what to do instead of surfacing a raw status.
+    const status = error.response?.status;
+    if (status === 403 || status === 401 || status === 429) {
+      throw new Error(
+        'This website blocks automated access. Please copy the recipe text and use the "Paste Content" tab instead.'
+      );
+    }
+
     throw new Error(`Failed to scrape webpage: ${error.message}`);
   }
 }
 
 // POST /api/extract - Extract recipe information from raw text or URL
+// Open to guests, but rate limited to protect the Azure OpenAI budget.
 router.post(
   '/',
+  optionalAuthMiddleware,
+  extractRateLimiter,
   body('text').optional().isString(),
   body('url').optional().isString(),
   async (req, res, next) => {
@@ -174,7 +189,14 @@ Rules:
       };
 
       console.log('Sending response:', recipe);
-      res.json(recipe);
+      res.json({
+        ...recipe,
+        quota: {
+          isGuest: Boolean(req.isGuest),
+          limit: req.rateLimit?.limit,
+          remaining: req.rateLimit?.remaining,
+        },
+      });
     } catch (err) {
       console.error('Azure OpenAI error:', err);
       next(err);

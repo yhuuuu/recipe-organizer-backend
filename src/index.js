@@ -20,6 +20,10 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(morgan('dev'));
 
+// Render/Netlify style proxies put the real client IP in X-Forwarded-For.
+// Without this the rate limiter would treat every request as one shared IP.
+app.set('trust proxy', 1);
+
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/recipes', recipesRouter);

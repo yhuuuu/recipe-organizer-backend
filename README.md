@@ -51,6 +51,11 @@ AZURE_OPENAI_ENDPOINT=your_azure_openai_endpoint
 AZURE_OPENAI_API_KEY=your_azure_openai_api_key
 AZURE_OPENAI_DEPLOYMENT=gpt-5.2-chat
 AZURE_OPENAI_API_VERSION=2024-04-01-preview
+
+# AI extraction quotas (optional, per day)
+# Guests are keyed by IP, signed-in users by user id.
+EXTRACT_GUEST_DAILY_LIMIT=5
+EXTRACT_USER_DAILY_LIMIT=50
 ```
 
 ### 3. Run Development Server
@@ -246,6 +251,36 @@ Content-Type: application/json
 - Automatically scrapes webpage content from URLs
 - Uses Azure OpenAI to extract structured recipe data
 - Returns JSON format ready for frontend use
+
+**Rate limiting (protects the Azure OpenAI budget):**
+
+This endpoint is intentionally public so visitors can try the AI extraction
+without creating an account, so it is rate limited instead of authenticated:
+
+| Caller | Key | Default daily limit | Env var |
+| --- | --- | --- | --- |
+| Guest (no/invalid token) | client IP | 5 | `EXTRACT_GUEST_DAILY_LIMIT` |
+| Signed-in user | user id | 50 | `EXTRACT_USER_DAILY_LIMIT` |
+
+An invalid or forged token is treated as a guest, so the stricter limit cannot
+be bypassed. When the quota is exhausted the endpoint returns 429:
+
+```json
+{
+  "error": "Demo limit reached (5 AI extractions per day). Create a free account to keep going.",
+  "code": "GUEST_QUOTA_EXCEEDED",
+  "limit": 5
+}
+```
+
+Successful responses include the caller's remaining quota:
+
+```json
+{ "quota": { "isGuest": true, "limit": 5, "remaining": 4 } }
+```
+
+> Limits are stored in memory, so they reset on restart and are per-instance.
+> Move to a shared store (e.g. Redis) if you ever run more than one instance.
 
 ---
 
